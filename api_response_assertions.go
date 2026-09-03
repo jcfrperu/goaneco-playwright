@@ -41,7 +41,7 @@ func (a *APIResponseAssertions) ToBeOK(ctx context.Context) error {
 	message += "\nCall log:\n" + logLine
 
 	contentType := a.response.headers["content-type"]
-	if isTexualMimeType(contentType) {
+	if isTextualMimeType(contentType) {
 		text, err := a.response.Text(ctx)
 		if err == nil {
 			message += fmt.Sprintf("\nResponse text:\n%s", subString(text, 0, 1000))
@@ -50,7 +50,7 @@ func (a *APIResponseAssertions) ToBeOK(ctx context.Context) error {
 	return errors.New(message)
 }
 
-func isTexualMimeType(mimeType string) bool {
+func isTextualMimeType(mimeType string) bool {
 	return textualMimeTypeRe.MatchString(mimeType)
 }
 

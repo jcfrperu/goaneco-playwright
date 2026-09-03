@@ -304,7 +304,7 @@ func (a *LocatorAssertions) ToHaveCSS(ctx context.Context, name, value string) e
 // then deserializes it and compares with the element property via deepEquals.
 func (a *LocatorAssertions) ToHaveJSProperty(ctx context.Context, name string, value any) error {
 	envelope, err := json.Marshal(map[string]any{
-		"value":   serializeForWire(value),
+		"value":   serializeValue(value),
 		"handles": []any{},
 	})
 	if err != nil {
@@ -316,30 +316,6 @@ func (a *LocatorAssertions) ToHaveJSProperty(ctx context.Context, name string, v
 		ExpectedValue: envelope,
 		ExpectedText:  []protocol.ExpectedTextValue{},
 	})
-}
-
-// serializeForWire converts a Go value to Playwright's SerializedValue wire format.
-// Numbers → {"n": v}, booleans → {"b": v}, strings → {"s": v}, nil → {"v": "null"}.
-func serializeForWire(v any) map[string]any {
-	if v == nil {
-		return map[string]any{"v": "null"}
-	}
-	switch val := v.(type) {
-	case bool:
-		return map[string]any{"b": val}
-	case string:
-		return map[string]any{"s": val}
-	case int:
-		return map[string]any{"n": float64(val)}
-	case int64:
-		return map[string]any{"n": float64(val)}
-	case float32:
-		return map[string]any{"n": float64(val)}
-	case float64:
-		return map[string]any{"n": val}
-	default:
-		return map[string]any{"s": fmt.Sprintf("%v", v)}
-	}
 }
 
 // ToHaveValues asserts that a multi-select element has all the specified selected values.
@@ -356,29 +332,45 @@ func (a *LocatorAssertions) ToHaveValues(ctx context.Context, values []string) e
 }
 
 // extractRegexpInfo splits a Go *regexp.Regexp into a plain source pattern and JS-compatible
-// flags string. Go uses inline flags like (?i); we extract i, m, s and strip the prefix.
+// flags string. Go uses inline flags like (?i) and negations like (?-i); we track the active
+// set of i, m, s flags and strip all prefix directives from the source.
 func extractRegexpInfo(re *regexp.Regexp) (source, flags string) {
 	if re == nil {
 		return "", ""
 	}
 	s := re.String()
-	// Only strip pure flag-directive prefixes like (?i), (?im), (?ims) — NOT (?:...) groups.
-	// A pure flag group has the form (?[imsU-]+) with no other content before the closing paren.
+	activeFlags := make(map[rune]bool)
+	// Only strip pure flag-directive prefixes like (?i), (?-i), (?im) — NOT (?:...) groups.
 	for {
 		loc := flagPrefixRegexp.FindStringSubmatchIndex(s)
 		if loc == nil {
 			break
 		}
 		inner := s[loc[2]:loc[3]]
+		negated := false
 		for _, c := range inner {
+			if c == '-' {
+				negated = true
+				continue
+			}
 			switch c {
 			case 'i', 'm', 's':
-				flags += string(c)
+				if negated {
+					delete(activeFlags, c)
+				} else {
+					activeFlags[c] = true
+				}
 			}
 		}
 		s = s[loc[1]:]
 	}
-	return s, flags
+	var b strings.Builder
+	for _, c := range []rune{'i', 'm', 's'} {
+		if activeFlags[c] {
+			b.WriteRune(c)
+		}
+	}
+	return s, b.String()
 }
 
 // ToContainTextRegex asserts that the element contains text matching the given regular expression.

@@ -71,7 +71,9 @@ func (p *Page) WaitForFileChooser(ctx context.Context, trigger func()) (*FileCho
 	})
 	defer cancel()
 
-	trigger()
+	if trigger != nil {
+		trigger()
+	}
 
 	select {
 	case fc := <-ch:

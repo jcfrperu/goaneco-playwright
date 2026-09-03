@@ -939,46 +939,6 @@ func (l *Locator) TextContent(ctx context.Context) (*string, error) {
 	return resp.Value, nil
 }
 
-// allStrings evaluates a JS expression that maps querySelectorAll results to strings.
-// jsExpr must be a complete JS expression using a JSON-encoded selector substituted via %s.
-func (l *Locator) allStrings(ctx context.Context, jsExpr string, opName string) ([]string, error) {
-	selJSON, _ := json.Marshal(l.selector)
-	result, err := l.frame.SendMessageRequest(ctx, "evaluateExpressionHandle", frameEvaluateExpressionParams{
-		Expression: fmt.Sprintf(jsExpr, string(selJSON)),
-		World:      "main",
-		Arg:        serializeArgument(nil),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("locator.%s failed: %w", opName, err)
-	}
-	var handleResp struct {
-		Handle struct {
-			Guid string `json:"guid"`
-		} `json:"handle"`
-	}
-	if err := json.Unmarshal(result, &handleResp); err != nil {
-		return nil, fmt.Errorf("locator.%s: parse handle failed: %w", opName, err)
-	}
-	handle := &JSHandle{owner: l.frame.child(handleResp.Handle.Guid)}
-	val, err := handle.JSONValue(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("locator.%s: JSONValue failed: %w", opName, err)
-	}
-	raw, ok := val.([]any)
-	if !ok {
-		return nil, fmt.Errorf("locator.%s: unexpected type %T", opName, val)
-	}
-	texts := make([]string, len(raw))
-	for i, v := range raw {
-		s, ok := v.(string)
-		if !ok {
-			return nil, fmt.Errorf("locator.%s: element %d has unexpected type %T", opName, i, v)
-		}
-		texts[i] = s
-	}
-	return texts, nil
-}
-
 // AllTextContents returns the text content of all elements matching this locator.
 // Uses evalOnSelectorAll IPC to support compound selectors (e.g. "article >> p").
 func (l *Locator) AllTextContents(ctx context.Context) ([]string, error) {
@@ -1255,7 +1215,9 @@ func (l *Locator) ScrollIntoViewIfNeeded(ctx context.Context) error {
 	if qresp.Element == nil {
 		return fmt.Errorf("locator.scrollIntoViewIfNeeded: element not found for selector %q", l.selector)
 	}
-	return elementHandleFromGUID(l.frame, qresp.Element.Guid).ScrollIntoViewIfNeeded(ctx)
+	el := elementHandleFromGUID(l.frame, qresp.Element.Guid)
+	defer func() { _ = el.Dispose(context.Background()) }()
+	return el.ScrollIntoViewIfNeeded(ctx)
 }
 
 // BoundingBox returns the bounding box of the element matched by this locator,
@@ -1281,7 +1243,9 @@ func (l *Locator) BoundingBox(ctx context.Context) (*BoundingBox, error) {
 	if qresp.Element == nil {
 		return nil, fmt.Errorf("locator.boundingBox: element not found for selector %q", l.selector)
 	}
-	return elementHandleFromGUID(l.frame, qresp.Element.Guid).BoundingBox(ctx)
+	el := elementHandleFromGUID(l.frame, qresp.Element.Guid)
+	defer func() { _ = el.Dispose(context.Background()) }()
+	return el.BoundingBox(ctx)
 }
 
 // Screenshot captures a screenshot of the element matched by this locator.
@@ -1307,5 +1271,6 @@ func (l *Locator) Screenshot(ctx context.Context, opts ...*ScreenshotOptions) ([
 		return nil, fmt.Errorf("locator.screenshot: element not found for selector %q", l.selector)
 	}
 	el := elementHandleFromGUID(l.frame, qresp.Element.Guid)
+	defer func() { _ = el.Dispose(context.Background()) }()
 	return el.Screenshot(ctx, opts...)
 }

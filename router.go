@@ -81,23 +81,6 @@ func (r *routeRouter) dispatch(route *Route) {
 	go func() {
 		for i := len(entries) - 1; i >= 0; i-- {
 			entry := entries[i]
-			// Enforce call-count limit.
-			if entry.times > 0 {
-				n := atomic.AddInt32(&entry.count, 1)
-				if n > entry.times {
-					// Entry exhausted — remove it from the router to prevent unbounded growth.
-					r.mu.Lock()
-					for j, e := range r.entries {
-						if e == entry {
-							r.entries = append(r.entries[:j], r.entries[j+1:]...)
-							break
-						}
-					}
-					r.mu.Unlock()
-					continue
-				}
-			}
-
 			// Skip if the request URL does not match this entry's pattern.
 			if entry.pattern != "" {
 				req := route.Request()
@@ -111,6 +94,25 @@ func (r *routeRouter) dispatch(route *Route) {
 					if !matches {
 						continue
 					}
+				}
+			}
+
+			// Enforce call-count limit only after confirming the URL matches.
+			if entry.times > 0 {
+				n := atomic.AddInt32(&entry.count, 1)
+				if n > entry.times {
+					// Entry exhausted — remove it from the router to prevent unbounded growth.
+					r.mu.Lock()
+					for j, e := range r.entries {
+						if e == entry {
+							copy(r.entries[j:], r.entries[j+1:])
+							r.entries[len(r.entries)-1] = nil
+							r.entries = r.entries[:len(r.entries)-1]
+							break
+						}
+					}
+					r.mu.Unlock()
+					continue
 				}
 			}
 
@@ -195,11 +197,24 @@ func buildGlobRegexp(pattern string) (*regexp.Regexp, error) {
 					if j > 0 {
 						re.WriteByte('|')
 					}
-					for _, c := range part {
-						if strings.ContainsRune(`.+()[]^$|\\`, c) {
+					// Translate glob tokens inside alternatives the same way as at top level.
+					for k := 0; k < len(part); k++ {
+						switch part[k] {
+						case '*':
+							if k+1 < len(part) && part[k+1] == '*' {
+								re.WriteString(".*")
+								k++
+							} else {
+								re.WriteString("[^/]*")
+							}
+						case '?':
+							re.WriteString("[^/]")
+						case '.', '+', '(', ')', '[', ']', '^', '$', '|', '\\':
 							re.WriteByte('\\')
+							re.WriteByte(part[k])
+						default:
+							re.WriteByte(part[k])
 						}
-						re.WriteRune(c)
 					}
 				}
 				re.WriteByte(')')

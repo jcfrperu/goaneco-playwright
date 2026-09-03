@@ -80,7 +80,9 @@ func (p *Page) Workers() []*Worker {
 func (p *Page) subscribeToWorkers() {
 	id := p.owner.conn.OnEvent(p.owner.guid, "worker", func(params json.RawMessage) {
 		var event struct {
-			Worker struct{ Guid string `json:"guid"` } `json:"worker"`
+			Worker struct {
+				Guid string `json:"guid"`
+			} `json:"worker"`
 		}
 		if err := json.Unmarshal(params, &event); err != nil || event.Worker.Guid == "" {
 			return
@@ -101,7 +103,9 @@ func (p *Page) subscribeToWorkers() {
 			p.mu.Lock()
 			for i, pw := range p.workers {
 				if pw == w {
-					p.workers = append(p.workers[:i], p.workers[i+1:]...)
+					copy(p.workers[i:], p.workers[i+1:])
+					p.workers[len(p.workers)-1] = nil
+					p.workers = p.workers[:len(p.workers)-1]
 					break
 				}
 			}

@@ -90,8 +90,10 @@ func TestMetadataZonesAreIsolatedBetweenConcurrentCalls(t *testing.T) {
 		is.Positive(env.Metadata.WallTime, "metadata wallTime must be populated")
 		seenMethods[env.Method] = true
 
+		paramsBytes, marshalErr := json.Marshal(env.Params)
+		is.NoError(marshalErr)
 		var params map[string]int
-		err := json.Unmarshal(env.Params, &params)
+		err := json.Unmarshal(paramsBytes, &params)
 		is.NoError(err)
 		is.Contains(params, "index")
 	}
@@ -220,7 +222,8 @@ func TestLocator_ExplicitZeroTimeoutPreservedOnWire(t *testing.T) {
 		if err := json.Unmarshal(payload, &env); err != nil {
 			return err
 		}
-		capturedParams = env.Params
+		paramsBytes, _ := json.Marshal(env.Params)
+		capturedParams = json.RawMessage(paramsBytes)
 
 		go func(id int) {
 			conn.Dispatch([]byte(fmt.Sprintf(`{"id":%d,"result":{}}`, id)))
@@ -276,7 +279,8 @@ func TestChannelOwner_ChildAndNilParams(t *testing.T) {
 		if err := json.Unmarshal(payload, &env); err != nil {
 			return err
 		}
-		capturedParams = env.Params
+		paramsBytes, _ := json.Marshal(env.Params)
+		capturedParams = json.RawMessage(paramsBytes)
 
 		go func(id int) {
 			conn.Dispatch([]byte(fmt.Sprintf(`{"id":%d,"result":{"status":"ok"}}`, id)))

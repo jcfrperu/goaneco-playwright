@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/jcfrperu/goaneco-playwright/protocol"
 )
@@ -96,8 +97,12 @@ func (p *Page) Screenshot(ctx context.Context, opts ...*ScreenshotOptions) ([]by
 		return nil, fmt.Errorf("failed to parse screenshot response: %w", err)
 	}
 	if len(opts) > 0 && opts[0] != nil && opts[0].Path != "" {
-		if err := os.WriteFile(opts[0].Path, resp.Binary, 0644); err != nil {
-			return nil, fmt.Errorf("page.screenshot: failed to write file %q: %w", opts[0].Path, err)
+		savePath := opts[0].Path
+		if err := os.MkdirAll(filepath.Dir(savePath), 0755); err != nil {
+			return nil, fmt.Errorf("page.screenshot: failed to create directory: %w", err)
+		}
+		if err := os.WriteFile(savePath, resp.Binary, 0644); err != nil {
+			return nil, fmt.Errorf("page.screenshot: failed to write file %q: %w", savePath, err)
 		}
 	}
 	return resp.Binary, nil

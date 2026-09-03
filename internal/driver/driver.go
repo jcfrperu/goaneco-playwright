@@ -105,19 +105,22 @@ func StartDriver(ctx context.Context, cliPath string) (*Driver, error) {
 		done:      done,
 	}
 
-	// Watchdog: closes transport and reaps the process; signals done when finished.
+	// Watchdog: reaps the process and signals completion.
+	// Per os/exec docs, Wait must not be called before all reads from StdoutPipe have completed.
+	// We drain both readers first, then call cmd.Wait() to safely reap the process status.
 	go func() {
 		defer close(done)
+
+		cancel()     // signal context-aware goroutines to begin exiting
+		tr.Wait()    // drain transport reader until process closes stdout
+		<-stderrDone // drain stderr reader until process closes stderr
 
 		d.waitErr = cmd.Wait()
 		if d.waitErr != nil && driverCtx.Err() == nil {
 			slog.Default().Error("playwright driver process exited with error", "error", d.waitErr)
 		}
 
-		cancel()   // Cancel context so reader and dispatcher goroutines initiate exit
-		tr.Close() // Close pipes
-		tr.Wait()  // Ensure transport reader goroutine has completely exited before closing channel
-		<-stderrDone
+		tr.Close() // idempotent via sync.Once; ensures pipes are closed
 		close(onMessage)
 	}()
 

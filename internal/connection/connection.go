@@ -178,6 +178,7 @@ func (c *Connection) Dispatch(msg []byte) {
 // Close signals that the connection is permanently broken.
 // All goroutines blocked in SendRequest will receive err and unblock immediately.
 // Subsequent SendRequest calls return err without sending.
+// Also unblocks any WaitPlaywright callers that are still waiting.
 func (c *Connection) Close(err error) {
 	if err == nil {
 		err = fmt.Errorf("connection closed")
@@ -197,6 +198,10 @@ func (c *Connection) Close(err error) {
 		delete(c.callbacks, id)
 	}
 	c.mu.Unlock()
+
+	// Unblock WaitPlaywright if the Playwright root object was never received.
+	// playwrightOnce guarantees close(playwrightReady) is called exactly once.
+	c.playwrightOnce.Do(func() { close(c.playwrightReady) })
 }
 
 // SendRequest registers a pending callback for id, calls send(payload), then waits for
@@ -272,7 +277,13 @@ func (c *Connection) NextID() int {
 func (c *Connection) WaitPlaywright(ctx context.Context) (*ObjectRef, error) {
 	select {
 	case <-c.playwrightReady:
-		return c.playwrightObj, nil
+		c.mu.RLock()
+		obj := c.playwrightObj
+		c.mu.RUnlock()
+		if obj == nil {
+			return nil, fmt.Errorf("connection closed before playwright was initialized")
+		}
+		return obj, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
@@ -296,19 +307,29 @@ func (c *Connection) OnEvent(guid, method string, handler func(json.RawMessage))
 // The returned ListenerID can be used to cancel the listener before it fires via OffEvent.
 // After the handler has executed, calling OffEvent with the returned ID is a safe no-op.
 func (c *Connection) OnEventOnce(guid, method string, handler func(json.RawMessage)) ListenerID {
-	var (
-		once   sync.Once
-		onceID ListenerID
-	)
-	onceID = c.OnEvent(guid, method, func(payload json.RawMessage) {
+	// Pre-allocate the ID before registering the handler so the closure captures
+	// an immutable value, eliminating the data race where the dispatch goroutine
+	// could read a zero onceID before the calling goroutine finishes assigning it.
+	id := ListenerID(c.nextListenerID.Add(1))
+	var once sync.Once
+
+	wrapper := func(payload json.RawMessage) {
 		once.Do(func() {
-			c.OffEvent(guid, method, onceID)
+			c.OffEvent(guid, method, id)
 			if handler != nil {
 				handler(payload)
 			}
 		})
-	})
-	return onceID
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	key := eventKey{GUID: guid, Method: method}
+	if _, exists := c.eventListeners[key]; !exists {
+		c.guidListeners[guid] = append(c.guidListeners[guid], key)
+	}
+	c.eventListeners[key] = append(c.eventListeners[key], eventHandler{id: id, fn: wrapper})
+	return id
 }
 
 // OffEvent removes an event handler by its ListenerID.

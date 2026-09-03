@@ -46,7 +46,7 @@ type requestEnvelope struct {
 	ID       *int            `json:"id"`
 	GUID     string          `json:"guid"`
 	Method   string          `json:"method"`
-	Params   json.RawMessage `json:"params"`
+	Params   any             `json:"params"`
 	Metadata requestMetadata `json:"metadata"`
 }
 
@@ -70,16 +70,11 @@ func (c *ChannelOwner) sendMessage(ctx context.Context, method string, params an
 	}
 	id := c.conn.NextID()
 
-	payloadBytes, err := json.Marshal(params)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal params: %w", err)
-	}
-
 	msgStruct := requestEnvelope{
 		ID:     &id,
 		GUID:   c.guid,
 		Method: method,
-		Params: payloadBytes,
+		Params: params,
 		Metadata: requestMetadata{
 			WallTime: time.Now().UnixMilli(),
 			Timeout:  timeoutMs,

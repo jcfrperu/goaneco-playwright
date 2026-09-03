@@ -93,7 +93,9 @@ func (b *Browser) removeContext(target *BrowserContext) {
 	defer b.mu.Unlock()
 	for i, c := range b.contexts {
 		if c == target {
-			b.contexts = append(b.contexts[:i], b.contexts[i+1:]...)
+			copy(b.contexts[i:], b.contexts[i+1:])
+			b.contexts[len(b.contexts)-1] = nil
+			b.contexts = b.contexts[:len(b.contexts)-1]
 			break
 		}
 	}

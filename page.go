@@ -69,9 +69,9 @@ type Page struct {
 	workerNextID            int
 	workerListenerActive    bool
 	workerListenerID        connection.ListenerID
-	video                   *Video                // set when the page's video recording artifact is ready
-	collectedPageErrors     []string              // uncaught exceptions accumulated via context pageerror event; guarded by mu
-	viewportSize            *ViewportSize         // nil when context was created with NoDefaultViewport
+	video                   *Video        // set when the page's video recording artifact is ready
+	collectedPageErrors     []string      // uncaught exceptions accumulated via context pageerror event; guarded by mu
+	viewportSize            *ViewportSize // nil when context was created with NoDefaultViewport
 }
 
 // SetErrorWriter sets the destination for internal diagnostic messages (e.g., route handler panics).
@@ -1318,14 +1318,34 @@ func (p *Page) subscribeToPageErrors() {
 	p.mu.Unlock()
 }
 
-// subscribeToPageClose listens to the page-level "close" event and calls
-// context-level OnPageClose handlers.
+// subscribeToPageClose listens to the page-level "close" event, cleans up state,
+// and calls context-level OnPageClose handlers.
 func (p *Page) subscribeToPageClose() {
 	if p.browserContext == nil {
 		return
 	}
 	p.owner.conn.OnEventOnce(p.owner.guid, "close", func(_ json.RawMessage) {
-		p.browserContext.callPageCloseHandlers(p)
+		p.mu.Lock()
+		p.closed = true
+		navID := p.navListenID
+		loadID := p.pageLoadListenID
+		errID := p.pageErrorListenID
+		bCtx := p.browserContext
+		p.mu.Unlock()
+
+		if bCtx != nil {
+			bCtx.removePage(p)
+			if navID != 0 {
+				p.owner.conn.OffEvent(p.mainFrame.guid, "navigated", navID)
+			}
+			if loadID != 0 {
+				p.owner.conn.OffEvent(p.mainFrame.guid, "loadstate", loadID)
+			}
+			if errID != 0 {
+				p.owner.conn.OffEvent(bCtx.owner.guid, "pageError", errID)
+			}
+			bCtx.callPageCloseHandlers(p)
+		}
 	})
 }
 

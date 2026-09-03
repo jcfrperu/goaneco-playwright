@@ -222,7 +222,9 @@ func (c *BrowserContext) removePage(target *Page) {
 	defer c.mu.Unlock()
 	for i, p := range c.pages {
 		if p == target {
-			c.pages = append(c.pages[:i], c.pages[i+1:]...)
+			copy(c.pages[i:], c.pages[i+1:])
+			c.pages[len(c.pages)-1] = nil
+			c.pages = c.pages[:len(c.pages)-1]
 			break
 		}
 	}
@@ -406,14 +408,14 @@ func (c *BrowserContext) retainSubscription(ctx context.Context, event string) {
 // When the count reaches zero, updateSubscription(enabled:false) is sent to the Playwright server.
 func (c *BrowserContext) releaseSubscription(event string) {
 	c.mu.Lock()
-	if c.subscriptionCounts != nil && c.subscriptionCounts[event] > 0 {
-		c.subscriptionCounts[event]--
+	if c.subscriptionCounts == nil || c.subscriptionCounts[event] <= 0 {
+		c.mu.Unlock()
+		return // never subscribed; nothing to release
 	}
-	count := 0
-	if c.subscriptionCounts != nil {
-		count = c.subscriptionCounts[event]
-	}
+	c.subscriptionCounts[event]--
+	count := c.subscriptionCounts[event]
 	c.mu.Unlock()
+
 	if count == 0 {
 		releaseCtx, cancel := context.WithTimeout(context.Background(), defaultSubscriptionTimeout)
 		defer cancel()

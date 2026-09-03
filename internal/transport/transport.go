@@ -73,16 +73,17 @@ func (t *PipeTransport) Start(ctx context.Context) {
 	}()
 }
 
-// Send writes a length-prefixed message to the pipe. The 4-byte little-endian length header
-// is written atomically with the payload under a mutex to prevent interleaving from concurrent callers.
+// Send writes a length-prefixed message to the pipe in a single write call.
+// Assembling header and payload into one packet prevents partial-frame corruption
+// if the header write succeeds but the payload write fails.
 func (t *PipeTransport) Send(message []byte) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if err := binary.Write(t.streamWriter, binary.LittleEndian, uint32(len(message))); err != nil {
-		return err
-	}
-	_, err := t.streamWriter.Write(message)
+	packet := make([]byte, 4+len(message))
+	binary.LittleEndian.PutUint32(packet[:4], uint32(len(message)))
+	copy(packet[4:], message)
+	_, err := t.streamWriter.Write(packet)
 	return err
 }
 
